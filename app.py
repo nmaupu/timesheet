@@ -49,6 +49,12 @@ def register_event():
 
     return jsonify({'success': True})
 
+@app.route('/events')
+def get_events():
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute('SELECT date, status FROM events').fetchall()
+    return jsonify([{'date': d, 'status': s} for d, s in rows])
+
 @app.route('/lock', methods=['POST'])
 def lock_month():
     data = request.json

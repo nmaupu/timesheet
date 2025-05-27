@@ -22,7 +22,7 @@
 
     <div class="mb-4 flex flex-wrap gap-4">
       <button id="btnFillWork" class="px-4 py-2 bg-amber-500 text-white rounded">Fill Work</button>
-      <button id="btnClearAll" class="px-4 py-2 bg-gray-600 text-white rounded">Clear All</button>
+      <button id="btnClearWork" class="px-4 py-2 bg-red-700 text-white rounded">Clear</button>
       <button id="btnWork" class="px-4 py-2 bg-green-600 text-white rounded">Work</button>
       <button id="btnAbsence" class="px-4 py-2 bg-red-600 text-white rounded">Absence</button>
       <button id="btnToggleLock" class="px-4 py-2 bg-indigo-600 text-white rounded flex items-center gap-2">
@@ -57,6 +57,23 @@
       calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
         firstDay: 1,
+        eventSources: [{
+          events: function(fetchInfo, successCallback, failureCallback) {
+            fetch('/events')
+              .then(res => res.json())
+              .then(data => {
+                const events = data.map(evt => ({
+                  id: evt.date,
+                  title: evt.status,
+                  start: evt.date,
+                  allDay: true,
+                  classNames: [evt.status]
+                }));
+                successCallback(events);
+              })
+              .catch(failureCallback);
+          }
+        }],
         showNonCurrentDates: true,
         selectable: true,
         dateClick: function (info) {
@@ -75,24 +92,41 @@
           removeHolidayEvents();
           loadHolidays(info.startStr, info.endStr);
           loadSummary(currentYear, currentMonth);
-        }
+
+          // 🧼 Clear non-holiday events to prevent duplicates
+          calendar.getEvents().forEach(event => {
+            if (!event.id.startsWith('holiday-')) {
+              event.remove();
+            }
+          });
+
+          calendar.refetchEvents();
+        },
       });
 
       calendar.render();
 
-      document.getElementById('btnClearAll').addEventListener('click', () => {
-        const events = calendar.getEvents();
-        events.forEach(event => {
-          if (event.id && !event.id.startsWith('holiday-')) {
+      document.getElementById('btnClearWork').addEventListener('click', () => {
+        const year = currentYear;
+        const month = currentMonth;
+        const daysInMonth = new Date(year, month, 0).getDate();
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const date = new Date(year, month - 1, day);
+          const dateStr = formatDateToYMD(date);
+          const event = calendar.getEventById(dateStr);
+
+          if (event && event.title === 'work') {
+            event.remove();
             fetch('/event', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ date: event.startStr, status: null })
+              body: JSON.stringify({ date: dateStr, status: null })
             });
-            event.remove();
           }
-        });
-        loadSummary(currentYear, currentMonth);
+        }
+
+        loadSummary(year, month);
       });
 
       document.getElementById('btnWork').addEventListener('click', () => currentStatus = 'work');
@@ -226,6 +260,7 @@
           document.getElementById('summary').textContent = `Total work days: ${data.workdays}`;
         });
     }
+
   </script>
 </body>
 </html>
