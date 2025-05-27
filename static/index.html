@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timesheet</title>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .fc-event.work { background-color: #16a34a !important; border-color: #16a34a !important; }
+    .fc-event.absence { background-color: #dc2626 !important; border-color: #dc2626 !important; }
+    .fc-event.holiday { background-color: #9ca3af !important; border-color: #9ca3af !important; color: #000 !important; }
+    .fc-day-sat, .fc-day-sun { background-color: #f3f4f6 !important; }
+    .locked-month { opacity: 0.5; }
+    .fc-day-other { background-color: #e5e7eb !important; opacity: 0.3; pointer-events: none; }
+  </style>
+</head>
+<body class="bg-gray-100 p-4">
+  <div class="max-w-4xl mx-auto">
+    <h1 class="text-2xl font-bold mb-4">Timesheet</h1>
+
+    <div class="mb-4 flex flex-wrap gap-4">
+      <button id="btnClearAll" class="px-4 py-2 bg-gray-600 text-white rounded">Clear All</button>
+      <button id="btnWork" class="px-4 py-2 bg-green-600 text-white rounded">Work</button>
+      <button id="btnAbsence" class="px-4 py-2 bg-red-600 text-white rounded">Absence</button>
+      <button id="btnToggleLock" class="px-4 py-2 bg-indigo-600 text-white rounded flex items-center gap-2">
+        <span id="lockIcon"></span>
+        <span id="lockText">Toggle Lock</span>
+      </button>
+      <button id="btnExport" class="px-4 py-2 bg-blue-600 text-white rounded">Export PDF</button>
+    </div>
+
+    <div id="calendar" class="bg-white rounded shadow"></div>
+    <div id="statusLog" class="mt-4 text-sm text-gray-600"></div>
+    <div id="summary" class="mt-2 text-base font-medium text-gray-800"></div>
+  </div>
+
+  <script>
+    let calendar;
+    const synced = new Set();
+    let currentStatus = 'work';
+    let editingLocked = false;
+    let currentYear = null;
+    let currentMonth = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+      const calendarEl = document.getElementById('calendar');
+      calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        firstDay: 1,
+        showNonCurrentDates: true,
+        selectable: true,
+        dateClick: function (info) {
+          if (!editingLocked && !info.dayEl.classList.contains('fc-day-other')) {
+            toggleDate(info.dateStr);
+          }
+        },
+        eventClick: function (info) {
+          if (!editingLocked) toggleDate(info.event.startStr);
+        },
+        datesSet: function (info) {
+          const focused = calendar.getDate();
+          currentMonth = focused.getMonth() + 1;
+          currentYear = focused.getFullYear();
+          checkLockStatus(currentYear, currentMonth);
+          removeHolidayEvents();
+          loadHolidays(info.startStr, info.endStr);
+          loadSummary(currentYear, currentMonth);
+        }
+      });
+
+      calendar.render();
+
+      document.getElementById('btnClearAll').addEventListener('click', () => {
+        const events = calendar.getEvents();
+        events.forEach(event => {
+          if (event.id && !event.id.startsWith('holiday-')) {
+            fetch('/event', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ date: event.startStr, status: null })
+            });
+            event.remove();
+          }
+        });
+        loadSummary(currentYear, currentMonth);
+      });
+
+      document.getElementById('btnWork').addEventListener('click', () => currentStatus = 'work');
+      document.getElementById('btnAbsence').addEventListener('click', () => currentStatus = 'absence');
+      document.getElementById('btnToggleLock').addEventListener('click', () => {
+        const endpoint = editingLocked ? '/unlock' : '/lock';
+        fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ year: currentYear, month: currentMonth })
+        }).then(() => checkLockStatus(currentYear, currentMonth));
+      });
+
+      document.getElementById('btnExport').addEventListener('click', () => {
+        const focused = calendar.getDate();
+        const year = focused.getFullYear();
+        const month = focused.getMonth() + 1;
+        const url = `/export?year=${year}&month=${month}`;
+        window.open(url, '_blank');
+      });
+    });
+
+    function toggleDate(date) {
+      const existing = calendar.getEventById(date);
+      let newStatus = null;
+
+      if (existing) {
+        newStatus = null;
+        existing.remove();
+        synced.delete(date);
+      } else {
+        newStatus = currentStatus;
+        calendar.addEvent({
+          id: date,
+          title: newStatus,
+          start: date,
+          allDay: true,
+          classNames: [newStatus]
+        });
+        synced.add(date);
+      }
+
+      fetch('/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, status: newStatus })
+      }).then(() => loadSummary(currentYear, currentMonth));
+    }
+
+    function removeHolidayEvents() {
+      calendar.getEvents().forEach(event => {
+        if (event.id.startsWith('holiday-')) {
+          event.remove();
+        }
+      });
+    }
+
+    function loadHolidays(start, end) {
+      fetch(`/holidays?start=${start}&end=${end}`)
+        .then(res => res.json())
+        .then(data => {
+          data.forEach(event => {
+            calendar.addEvent({
+              id: `holiday-${event.date}`,
+              title: event.name,
+              start: event.date,
+              allDay: true,
+              classNames: ['holiday'],
+              display: 'background'
+            });
+          });
+        });
+    }
+
+    function checkLockStatus(year, month) {
+      fetch(`/locked?year=${year}&month=${month}`)
+        .then(res => res.json())
+        .then(data => {
+          editingLocked = data.locked;
+          const cal = document.getElementById('calendar');
+          const lockBtn = document.getElementById('btnToggleLock');
+          cal.classList.toggle('locked-month', editingLocked);
+          document.getElementById('lockText').textContent = editingLocked ? 'Unlock Month' : 'Validate Month';
+          document.getElementById('lockIcon').textContent = editingLocked ? '🔒' : '';
+          document.getElementById('statusLog').innerText = editingLocked ? 'Month is locked — read-only.' : 'Month is editable.';
+        });
+    }
+
+    function loadSummary(year, month) {
+      fetch(`/summary?year=${year}&month=${month}`)
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('summary').textContent = `Total work days: ${data.workdays}`;
+        });
+    }
+  </script>
+</body>
+</html>

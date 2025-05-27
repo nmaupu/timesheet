@@ -1,4 +1,154 @@
-# Byte-compiled / optimized / DLL files
+#from flask import Flask, request, jsonify, send_from_directory
+from datetime import datetime, timedelta
+import os
+import json
+import threading
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+app = Flask(__name__, static_folder='static')
+
+# Global in-memory store for unsynced events
+pending_events = {}
+synced_events = set()
+
+# Load Google API credentials
+creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/calendar'])
+service = build('calendar', 'v3', credentials=creds)
+
+CALENDAR_ID = 'BeReal timesheet'
+
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
+
+@app.route('/<path:path>')
+def static_proxy(path):
+    return send_from_directory('static', path)
+
+@app.route('/event', methods=['POST'])
+def register_event():
+    data = request.json
+    day = data['date']  # format YYYY-MM-DD
+    status = data['status']  # 'work', 'absence', or None
+    synced = data.get('synced', False)
+
+    if synced and day in synced_events:
+        # Mark for deletion
+        pending_events[day] = None
+    elif status:
+        pending_events[day] = status
+    elif day in pending_events:
+        del pending_events[day]
+
+    return jsonify({'success': True, 'pending': pending_events})
+
+@app.route('/sync', methods=['POST'])
+def sync_events():
+    results = {'created': [], 'deleted': []}
+
+    for date_str, status in pending_events.items():
+        event_id = None
+        if status:
+            # Create or update event
+            event = {
+                'summary': status,
+                'start': {'date': date_str},
+                'end': {'date': (datetime.strptime(date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')},
+            }
+            created_event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+            results['created'].append({'id': created_event['id'], 'date': date_str})
+            synced_events.add(date_str)
+        else:
+            # Deletion
+            events = service.events().list(calendarId=CALENDAR_ID, timeMin=date_str+'T00:00:00Z', timeMax=date_str+'T23:59:59Z').execute()
+            for item in events.get('items', []):
+                if item.get('summary') in ['work', 'absence']:
+                    service.events().delete(calendarId=CALENDAR_ID, eventId=item['id']).execute()
+                    results['deleted'].append({'id': item['id'], 'date': date_str})
+                    synced_events.discard(date_str)
+
+    pending_events.clear()
+    return jsonify(results)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+ from flask import Flask, request, jsonify, send_from_directory
+from datetime import datetime, timedelta
+import os
+import json
+import threading
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+app = Flask(__name__, static_folder='static')
+
+# Global in-memory store for unsynced events
+pending_events = {}
+synced_events = set()
+
+# Load Google API credentials
+creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/calendar'])
+service = build('calendar', 'v3', credentials=creds)
+
+CALENDAR_ID = 'BeReal timesheet'
+
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
+
+@app.route('/<path:path>')
+def static_proxy(path):
+    return send_from_directory('static', path)
+
+@app.route('/event', methods=['POST'])
+def register_event():
+    data = request.json
+    day = data['date']  # format YYYY-MM-DD
+    status = data['status']  # 'work', 'absence', or None
+    synced = data.get('synced', False)
+
+    if synced and day in synced_events:
+        # Mark for deletion
+        pending_events[day] = None
+    elif status:
+        pending_events[day] = status
+    elif day in pending_events:
+        del pending_events[day]
+
+    return jsonify({'success': True, 'pending': pending_events})
+
+@app.route('/sync', methods=['POST'])
+def sync_events():
+    results = {'created': [], 'deleted': []}
+
+    for date_str, status in pending_events.items():
+        event_id = None
+        if status:
+            # Create or update event
+            event = {
+                'summary': status,
+                'start': {'date': date_str},
+                'end': {'date': (datetime.strptime(date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')},
+            }
+            created_event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+            results['created'].append({'id': created_event['id'], 'date': date_str})
+            synced_events.add(date_str)
+        else:
+            # Deletion
+            events = service.events().list(calendarId=CALENDAR_ID, timeMin=date_str+'T00:00:00Z', timeMax=date_str+'T23:59:59Z').execute()
+            for item in events.get('items', []):
+                if item.get('summary') in ['work', 'absence']:
+                    service.events().delete(calendarId=CALENDAR_ID, eventId=item['id']).execute()
+                    results['deleted'].append({'id': item['id'], 'date': date_str})
+                    synced_events.discard(date_str)
+
+    pending_events.clear()
+    return jsonify(results)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -172,3 +322,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+token.json
