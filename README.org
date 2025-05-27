@@ -1,0 +1,94 @@
+#+TITLE: Timesheet Tracker
+#+OPTIONS: toc:nil
+
+* Overview
+
+This is a self-hosted, browser-based timesheet tracker that lets you log working and absence days via a calendar interface. It stores data locally in SQLite and includes PDF export, holiday integration, and optional customization via environment variables.
+
+Ideal for local deployment (Docker or Kubernetes).
+
+* Features
+
+- Click days to toggle between =work=, =absence=, or clear
+- Highlight French (or configurable) public holidays
+- Visual distinction for weekends and holidays
+- Lock/unlock months to prevent edits
+- PDF export with summary of work days
+- Light and fast single-container backend (Flask + SQLite)
+
+* Usage
+
+** Requirements
+
+- Python 3.8+
+- Install dependencies:
+
+  #+begin_src shell
+  pip install flask weasyprint requests python-dateutil
+  #+end_src
+
+** Running locally
+
+  #+begin_src shell
+  export TIMESHEET_TITLE="John Doe"         # optional: will appear in PDF title and filename
+  export TIMESHEET_DB="/data/timesheet.db"  # optional: path to SQLite file (default is ./timesheet.db)
+  export TIMESHEET_COUNTRY="FR"             # optional: ISO 3166-1 alpha-2 code for holidays (default is FR)
+
+  python app.py
+  #+end_src
+
+Open in browser: http://localhost:8080
+
+** Docker
+
+  #+begin_src dockerfile
+  FROM python:3.11-slim
+  WORKDIR /app
+  COPY . .
+  RUN pip install flask weasyprint requests python-dateutil
+  EXPOSE 8080
+  CMD ["python", "app.py"]
+  #+end_src
+
+  Build and run:
+
+  #+begin_src shell
+  docker build -t timesheet .
+  docker run -p 8080:8080 -v $PWD/data:/data \
+    -e TIMESHEET_TITLE="John Doe" \
+    -e TIMESHEET_COUNTRY="FR" \
+    -e TIMESHEET_DB="/data/timesheet.db" \
+    timesheet
+  #+end_src
+
+* Environment Variables
+
+| Variable           | Description                                            | Default             |
+|--------------------+--------------------------------------------------------+---------------------|
+| =TIMESHEET_DB=     | Path to SQLite database file                           | =./timesheet.db=    |
+| =TIMESHEET_TITLE=  | Name added to the PDF title and file name              | (empty)             |
+| =TIMESHEET_COUNTRY= | ISO 3166-1 alpha-2 country code for holiday API usage  | =FR=                |
+
+* API Endpoints
+
+| Method | Endpoint       | Purpose                                |
+|--------+----------------+----------------------------------------|
+| GET    | /              | Serves frontend                        |
+| GET    | /holidays      | Returns holidays for displayed range   |
+| GET    | /summary       | Returns work day count for the month   |
+| GET    | /export        | Returns generated PDF of current month |
+| POST   | /event         | Create/update/delete a work/absence    |
+| POST   | /lock /unlock  | Lock or unlock a specific month        |
+| GET    | /locked        | Check lock status for month            |
+| GET    | /health        | Healthcheck endpoint                   |
+
+* Notes
+
+- Public holidays come from [[https://date.nager.at/][Nager.Date API]]
+- Only France is supported by default (`FR`), but you can set any country code
+- Weekends are highlighted yellowish in PDF
+- Holidays are grayed out automatically in PDF and calendar
+
+* License
+
+Unilicense

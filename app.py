@@ -12,6 +12,7 @@ app = Flask(__name__, static_folder='static')
 
 DB_PATH = os.environ.get("TIMESHEET_DB", "timesheet.db")
 holiday_cache = {}
+HOLIDAY_COUNTRY = os.environ.get("TIMESHEET_COUNTRY", "FR")
 
 @app.route('/')
 def index():
@@ -91,7 +92,7 @@ def get_holidays():
     for year in years:
         year_str = str(year)
         if year_str not in holiday_cache:
-            response = requests.get(f'https://date.nager.at/api/v3/PublicHolidays/{year}/FR')
+            response = requests.get(f'https://date.nager.at/api/v3/PublicHolidays/{year}/{HOLIDAY_COUNTRY}')
             holiday_cache[year_str] = response.json() if response.status_code == 200 else []
         all_holidays.extend(holiday_cache[year_str])
 
