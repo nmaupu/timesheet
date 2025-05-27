@@ -21,6 +21,7 @@
     <h1 class="text-2xl font-bold mb-4">Timesheet</h1>
 
     <div class="mb-4 flex flex-wrap gap-4">
+      <button id="btnFillWork" class="px-4 py-2 bg-amber-500 text-white rounded">Fill Work</button>
       <button id="btnClearAll" class="px-4 py-2 bg-gray-600 text-white rounded">Clear All</button>
       <button id="btnWork" class="px-4 py-2 bg-green-600 text-white rounded">Work</button>
       <button id="btnAbsence" class="px-4 py-2 bg-red-600 text-white rounded">Absence</button>
@@ -43,6 +44,13 @@
     let editingLocked = false;
     let currentYear = null;
     let currentMonth = null;
+
+    function formatDateToYMD(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0'); // JS months are 0-based
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
 
     document.addEventListener('DOMContentLoaded', function () {
       const calendarEl = document.getElementById('calendar');
@@ -104,6 +112,44 @@
         const month = focused.getMonth() + 1;
         const url = `/export?year=${year}&month=${month}`;
         window.open(url, '_blank');
+      });
+
+      document.getElementById('btnFillWork').addEventListener('click', () => {
+        const year = currentYear;
+        const month = currentMonth;
+        const daysInMonth = new Date(year, month, 0).getDate();
+
+        fetch(`/holidays?start=${year}-${month.toString().padStart(2, '0')}-01&end=${year}-${month.toString().padStart(2, '0')}-${daysInMonth}`)
+          .then(res => res.json())
+          .then(holidays => {
+            const holidaySet = new Set(holidays.map(h => h.date));
+
+            for (let day = 1; day <= daysInMonth; day++) {
+              const date = new Date(year, month - 1, day);
+              const dateStr = formatDateToYMD(date);
+              const dayOfWeek = date.getDay();
+              const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+              if (!isWeekend && !holidaySet.has(dateStr)) {
+                const existing = calendar.getEventById(dateStr);
+                if (!existing) {
+                  calendar.addEvent({
+                    id: dateStr,
+                    title: 'work',
+                    start: dateStr,
+                    allDay: true,
+                    classNames: ['work']
+                  });
+                  fetch('/event', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date: dateStr, status: 'work' })
+                  });
+                }
+              }
+            }
+            loadSummary(year, month);
+          });
       });
     });
 
