@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from datetime import datetime
 import sqlite3
 import os
@@ -10,6 +10,9 @@ from weasyprint import HTML
 
 app = Flask(__name__, static_folder='static')
 
+DB_PATH = os.environ.get("TIMESHEET_DB", "timesheet.db")
+holiday_cache = {}
+
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
@@ -17,11 +20,6 @@ def index():
 @app.route('/<path:path>')
 def static_proxy(path):
     return send_from_directory('static', path)
-
-DB_PATH = os.environ.get("TIMESHEET_DB", "timesheet.db")
-
-synced_events = set()
-holiday_cache = {}
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
@@ -94,10 +92,7 @@ def get_holidays():
         year_str = str(year)
         if year_str not in holiday_cache:
             response = requests.get(f'https://date.nager.at/api/v3/PublicHolidays/{year}/FR')
-            if response.status_code == 200:
-                holiday_cache[year_str] = response.json()
-            else:
-                holiday_cache[year_str] = []
+            holiday_cache[year_str] = response.json() if response.status_code == 200 else []
         all_holidays.extend(holiday_cache[year_str])
 
     visible_holidays = [
@@ -108,8 +103,19 @@ def get_holidays():
 
     return jsonify(visible_holidays)
 
+@app.route('/summary')
+def get_summary():
+    year = int(request.args.get('year'))
+    month = int(request.args.get('month'))
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM events WHERE status = 'work' AND strftime('%Y', date) = ? AND strftime('%m', date) = ?", (str(year), f'{month:02}'))
+        count = cursor.fetchone()[0]
+    return jsonify({'workdays': count})
+
 @app.route('/export')
 def export_pdf():
+    user_title = os.environ.get("TIMESHEET_TITLE", "")
     year = int(request.args.get('year'))
     month = int(request.args.get('month'))
 
@@ -123,13 +129,9 @@ def export_pdf():
 
     event_map = {d: s for d, s in all_events}
 
-    # Load holidays
     if str(year) not in holiday_cache:
         response = requests.get(f'https://date.nager.at/api/v3/PublicHolidays/{year}/FR')
-        if response.status_code == 200:
-            holiday_cache[str(year)] = response.json()
-        else:
-            holiday_cache[str(year)] = []
+        holiday_cache[str(year)] = response.json() if response.status_code == 200 else []
 
     holiday_dates = set(h['date'] for h in holiday_cache[str(year)] if int(h['date'][5:7]) == month)
 
@@ -138,7 +140,7 @@ def export_pdf():
     rows = ''
     for week in cal_matrix:
         rows += '<tr>'
-        for day in week:
+        for i, day in enumerate(week):
             if day == 0:
                 rows += '<td></td>'
                 continue
@@ -148,12 +150,11 @@ def export_pdf():
             color = '#16a34a' if status == 'work' else '#dc2626' if status == 'absence' else 'transparent'
             bar = f'<div style="width: 6px; height: 1em; background-color: {color}; margin-right: 6px;"></div>' if color != 'transparent' else ''
             content = f'<div style="display: flex; align-items: flex-start;">{bar}<div><strong>{day}</strong><br>{status}</div></div>'
-            cell_style = 'background-color: #e5e7eb;' if is_holiday else ''
-            rows += f'<td style="{cell_style}">{content}</td>'
+            bg = '#e5e7eb' if is_holiday else '#fef9c3' if i >= 5 else 'white'
+            rows += f'<td style="background-color: {bg};">{content}</td>'
         rows += '</tr>'
 
     workdays = sum(1 for _, s in all_events if s == 'work')
-
     html = f"""
     <html>
     <head>
@@ -167,7 +168,7 @@ def export_pdf():
     </style>
     </head>
     <body>
-    <h2>Timesheet Calendar - {year}-{month:02}</h2>
+    <h2>Timesheet Calendar{f' - {user_title}' if user_title else ''} – {year}-{month:02}</h2>
     <table>
       <thead><tr>{''.join(f'<th>{wd}</th>' for wd in weekdays)}</tr></thead>
       <tbody>{rows}</tbody>
@@ -177,22 +178,8 @@ def export_pdf():
     """
 
     pdf = HTML(string=html).write_pdf()
-    return send_file(BytesIO(pdf), as_attachment=True, download_name=f"timesheet_{year}_{month:02}.pdf", mimetype='application/pdf')
-
-@app.route('/summary')
-def get_summary():
-    year = int(request.args.get('year'))
-    month = int(request.args.get('month'))
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT COUNT(*) FROM events
-            WHERE status = 'work'
-              AND strftime('%Y', date) = ?
-              AND strftime('%m', date) = ?
-        """, (str(year), f"{month:02}"))
-        count = cursor.fetchone()[0]
-    return jsonify({'workdays': count})
+    filename = f"timesheet_{user_title.strip().replace(' ', '_') + '_' if user_title else ''}{year}_{month:02}.pdf"
+    return send_file(BytesIO(pdf), as_attachment=True, download_name=filename, mimetype='application/pdf')
 
 @app.route('/health')
 def health():
