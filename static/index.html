@@ -14,6 +14,9 @@
     .fc-day-sat, .fc-day-sun { background-color: #f3f4f6 !important; }
     .locked-month { opacity: 0.5; }
     .fc-day-other { background-color: #e5e7eb !important; opacity: 0.3; pointer-events: none; }
+    button:disabled {
+      pointer-events: none;
+    }
   </style>
 </head>
 <body class="bg-gray-100 p-4">
@@ -244,14 +247,26 @@
         .then(res => res.json())
         .then(data => {
           editingLocked = data.locked;
+
           const cal = document.getElementById('calendar');
           const lockBtn = document.getElementById('btnToggleLock');
+          const fillBtn = document.getElementById('btnFillWork');
+          const clearBtn = document.getElementById('btnClearWork');
+
           cal.classList.toggle('locked-month', editingLocked);
           document.getElementById('lockText').textContent = editingLocked ? 'Unlock Month' : 'Validate Month';
           document.getElementById('lockIcon').textContent = editingLocked ? '🔒' : '';
           document.getElementById('statusLog').innerText = editingLocked ? 'Month is locked — read-only.' : 'Month is editable.';
+
+          fillBtn.disabled = editingLocked;
+          clearBtn.disabled = editingLocked;
+          fillBtn.classList.toggle('opacity-50', editingLocked);
+          clearBtn.classList.toggle('opacity-50', editingLocked);
+          fillBtn.classList.toggle('cursor-not-allowed', editingLocked);
+          clearBtn.classList.toggle('cursor-not-allowed', editingLocked);
         });
     }
+
 
     function loadSummary(year, month) {
       fetch(`/summary?year=${year}&month=${month}`)
